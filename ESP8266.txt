@@ -1,0 +1,288 @@
+#include <ESP8266WiFi.h>
+#include <FirebaseArduino.h>
+#include <NTPtimeESP.h>
+#include <Wire.h> 
+#include "DHT.h"
+
+#define DHTTYPE DHT11
+#define FIREBASE_HOST "triacfarmlogin-default-rtdb.firebaseio.com"                          // the project name address from firebase id
+#define FIREBASE_AUTH "GQgWFmYiIqiQA6wb52KkhMCxeUInkI4BE7ycQ5d0" 
+
+const char* ssid = "NHI";
+const char* password = "12589999";
+
+#define bom  5        //D1
+#define den  16       //D0
+#define quat  0       //D3
+//#define phunsuong 4   //D2
+#define phunsuong 14   //D5
+int ibom, iquat, iphunsuong, jphunsuong;
+
+String mystr = "";
+
+#define DHTPin 12
+
+DHT dht(DHTPin, DHTTYPE);
+static char celsiusTemp[7];
+static char fahrenheitTemp[7];
+static char humidityTemp[7];
+
+NTPtime NTPch("pool.ntp.org");
+strDateTime dateTime;
+
+int actualHour;
+int actualMinute;
+//int actualyear;
+//int actualMonth;
+//int actualday;        
+int actualdayofWeek;
+
+void setup()
+{
+  Serial.begin(115200);
+  delay(10);
+
+  pinMode(quat, OUTPUT);
+  pinMode(den, OUTPUT);
+  pinMode(bom, OUTPUT);
+  pinMode(phunsuong, OUTPUT);
+  
+  Serial.println();
+  Serial.print("Dang ket noi den mang… ");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("Da ket noi WiFi");
+  
+  Serial.println("Firebase dang khoi dong. Vui long doi dia chi IP…");
+  delay(1000);
+  Serial.println(WiFi.localIP());
+  Firebase.begin(FIREBASE_HOST, FIREBASE_AUTH);   
+  dht.begin();
+}
+
+void loop()
+{
+  float h = dht.readHumidity();                                              // Reading temperature or humidity takes about 250 milliseconds!
+  float t = dht.readTemperature();                                           // Read temperature as Celsius (the default)
+  h=h+25;
+    if (Firebase.failed()) {
+      Serial.println("Firebase Error" + Firebase.error());  
+     // ESP.reset ();
+      return;
+  }
+   if (isnan(t) || isnan(h)) {
+    Serial.println("nhi xinh dep");
+  } else {
+
+    Firebase.setFloat("/DHT/data/nhietDo", t);
+    Firebase.setFloat("/DHT/data/doAm", h);
+    Serial.print("nhietDo: ");
+    Serial.println(t);
+    Serial.print("doam: ");
+    Serial.println(h);
+  }
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  dateTime = NTPch.getNTPtime(7.0, 0);
+  
+  if(dateTime.valid)
+  {
+    NTPch.printDateTime(dateTime);
+
+    actualHour = dateTime.hour;            // Gio
+    actualMinute = dateTime.minute;        // Phut
+//    actualyear = dateTime.year;            // Nam
+//    actualMonth = dateTime.month;          // Thang
+//    actualday =dateTime.day;               // Ngay
+    actualdayofWeek = dateTime.dayofWeek;  //Thu
+  }
+
+  if(actualHour < 10)
+  {
+    String mygio = String(actualHour);
+    mystr = String(0 + mygio);
+  }
+  else
+  {
+    mystr = String(actualHour);
+  }
+  String mystr2 = String(mystr + ":");
+  if(actualMinute < 10)
+  {
+    String myphut = String(actualMinute);
+    mystr = String(0 + myphut);
+  }
+  else  
+  {
+    mystr = String(actualMinute);
+  }
+  String thgian = String(mystr2 + mystr);
+ // Serial.println(thgian);
+
+///////////////// Quat ////////////////////////////////////////////////////////////////////////////////////////////////////////
+  String Qon = Firebase.getString("Quat/NhietDo/NhietDoBat");
+  String Qoff = Firebase.getString("Quat/NhietDo/NhietDoTat");
+  String QtimeOn = Firebase.getString("Quat/HenGio/HenGioBat");
+  String QtimeOff = Firebase.getString("Quat/HenGio/HenGioTat");
+    
+  if(thgian == QtimeOn)
+  {
+    Firebase.setInt("Quat/Quat", 1);
+    Firebase.setInt("Quat/DKQuat", 1); 
+  }
+  if(thgian == QtimeOff)
+  {
+    Firebase.setInt("Quat/Quat", 0);
+    Firebase.setInt("Quat/DKQuat", 0);
+  }
+
+  if(Firebase.getInt("Quat/DKQuat") == 0)
+  {
+    if(Firebase.getInt("Quat/iquat") == 0 && t>Qon.toInt())
+    {
+      Firebase.setInt("Quat/Quat", 1); 
+      Firebase.setInt("Quat/iquat", 1); 
+    }
+    if(Firebase.getInt("Quat/iquat") == 1 && t<Qoff.toInt())
+    {
+      Firebase.setInt("Quat/Quat", 0);
+      Firebase.setInt("Quat/iquat", 0);
+    }
+  }
+
+  if(Firebase.getInt("Quat/Quat") == 1)
+  {
+    Serial.println("Quat turned ON");
+    digitalWrite(quat, LOW);
+  }
+  if(Firebase.getInt("Quat/Quat") == 0)
+  {
+    Serial.println("Quat turned OFF");
+    digitalWrite(quat, HIGH);
+  }
+//////////////////// Den ///////////////////////////////////////////////////////////////////////////////////////////////////
+ String DtimeOn = Firebase.getString("Den/HenGio/HenGioBat");
+  String DtimeOff = Firebase.getString("Den/HenGio/HenGioTat");
+
+   if(thgian == DtimeOn)
+  {
+    Firebase.setInt("Den/Den", 0); 
+  }  
+  if(thgian == DtimeOff)
+  {
+    Firebase.setInt("Den/Den", 1);
+  }
+    
+
+  if(Firebase.getInt("Den/Den") == 1)
+  {
+    Serial.println("Den turned ON");
+    digitalWrite(den, LOW);
+  }
+  if(Firebase.getInt("Den/Den") == 0)
+  {
+    Serial.println("Den turned OFF");
+    digitalWrite(den, HIGH);
+  }
+/////////////////// May Bom /////////////////////////////////////////////////////////////////////////////////////////////////////
+  String MBon = Firebase.getString("MayBom/NhietDo/NhietDoBat");
+  String MBoff = Firebase.getString("MayBom/NhietDo/NhietDoTat");
+  String MBtimeOn = Firebase.getString("MayBom/HenGio/HenGioBat");
+  String MBtimeOff = Firebase.getString("MayBom/HenGio/HenGioTat");
+
+  if(thgian == MBtimeOn)
+  {
+    Firebase.setInt("MayBom/MayBom", 1);
+    Firebase.setInt("MayBom/DKBom", 1); 
+  }
+  if(thgian == MBtimeOff)
+  {
+    Firebase.setInt("MayBom/MayBom", 0);
+    Firebase.setInt("MayBom/DKBom", 0);
+  }
+
+  if(Firebase.getInt("MayBom/DKBom") == 0)
+  {
+    if(Firebase.getInt("MayBom/ibom") == 0 && t>MBon.toInt())
+    {
+      Firebase.setInt("MayBom/MayBom", 1); 
+      Firebase.setInt("MayBom/ibom", 1); 
+    }
+    if(Firebase.getInt("MayBom/ibom") == 1 && t<MBoff.toInt())
+    {
+      Firebase.setInt("MayBom/MayBom", 0);
+      Firebase.setInt("MayBom/ibom", 0);
+    }
+  }
+
+  if(Firebase.getInt("MayBom/MayBom") == 0)
+  {
+    Serial.println("May Bom turned OFF");
+    digitalWrite(bom, HIGH);
+  }
+  else
+  {
+    Serial.println("May Bom turned ON");
+    digitalWrite(bom, LOW);
+  }
+
+///////////////////////// Phun Suong ////////////////////////////////////////////////////////////////////////////////////////////  
+  String PSTon = Firebase.getString("PhunSuong/NhietDo/NhietDoBat");
+  String PSToff = Firebase.getString("PhunSuong/NhietDo/NhietDoTat");
+  String PSHon = Firebase.getString("PhunSuong/DoAm/DoAmBat");
+  String PSHoff = Firebase.getString("PhunSuong/DoAm/DoAmTat");
+  String PStimeOn = Firebase.getString("PhunSuong/HenGio/HenGioBat");
+  String PStimeOff = Firebase.getString("PhunSuong/HenGio/HenGioTat");
+
+  if(thgian == PStimeOn)
+  {
+    Firebase.setInt("PhunSuong/PhunSuong", 1);
+    Firebase.setInt("PhunSuong/DKPhunSuong", 1); 
+  }
+  if(thgian == PStimeOff)
+  {
+    Firebase.setInt("PhunSuong/PhunSuong", 0);
+    Firebase.setInt("PhunSuong/DKPhunSuong", 0);
+  }
+
+  if(Firebase.getInt("PhunSuong/DKPhunSuong") == 0)
+  {
+    if(Firebase.getInt("PhunSuong/iPhunSuong") == 0 && t>PSTon.toInt())
+    {
+      Firebase.setInt("PhunSuong/PhunSuong", 1); 
+      Firebase.setInt("PhunSuong/iPhunSuong", 1); 
+    }
+    if(Firebase.getInt("PhunSuong/iPhunSuong") == 1 && t<PSToff.toInt())
+    {
+      Firebase.setInt("PhunSuong/PhunSuong", 0);
+      Firebase.setInt("PhunSuong/iPhunSuong", 0);
+    }
+
+    if(Firebase.getInt("PhunSuong/jPhunSuong") == 0 && h<PSHon.toInt())
+    {
+      Firebase.setInt("PhunSuong/PhunSuong", 1); 
+      Firebase.setInt("PhunSuong/jPhunSuong", 1); 
+    }
+    if(Firebase.getInt("PhunSuong/jPhunSuong") == 1 && h>PSHoff.toInt())
+    {
+      Firebase.setInt("PhunSuong/PhunSuong", 0);
+      Firebase.setInt("PhunSuong/jPhunSuong", 0);
+    }
+  }
+
+  if(Firebase.getInt("PhunSuong/PhunSuong") == 0)
+  {
+    Serial.println("Phun Suong turned OFF");
+    digitalWrite(phunsuong, HIGH);
+  }
+  else
+  {
+    Serial.println("Phun Suong turned ON");
+    digitalWrite(phunsuong, LOW);
+  }
+}
